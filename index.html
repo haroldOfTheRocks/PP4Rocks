@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Tetris</title>
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0d0d1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tetris">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0d0d1a;
+      font-family: 'Courier New', Courier, monospace;
+      color: #fff;
+      overflow: hidden;
+      height: 100dvh;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Landing ─────────────────────────────────────────── */
+    #landing {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      transition: opacity 0.4s ease;
+    }
+    #landing.hidden { opacity: 0; pointer-events: none; }
+
+    #bg-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .hero {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      padding: 28px 24px;
+      background: rgba(13, 13, 26, 0.65);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 4px;
+      backdrop-filter: blur(6px);
+      max-width: 92vw;
+    }
+
+    .hero h1 {
+      font-size: clamp(44px, 12vw, 96px);
+      font-weight: bold;
+      letter-spacing: 0.25em;
+      background: linear-gradient(135deg, #00ffff 0%, #cc00ff 50%, #ff8000 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 0 24px rgba(0,255,255,0.4));
+      margin-bottom: 10px;
+    }
+
+    .hero p {
+      font-size: clamp(10px, 2.5vw, 13px);
+      color: #8899aa;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      margin-bottom: 36px;
+    }
+
+    #start-btn {
+      display: inline-block;
+      padding: 14px 44px;
+      font-size: clamp(13px, 3.5vw, 16px);
+      font-family: inherit;
+      font-weight: bold;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      background: transparent;
+      color: #00ffff;
+      border: 2px solid #00ffff;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.1s;
+      outline: none;
+      touch-action: manipulation;
+    }
+    #start-btn:hover, #start-btn:focus-visible {
+      background: #00ffff;
+      color: #0d0d1a;
+      box-shadow: 0 0 36px rgba(0,255,255,0.45);
+    }
+    #start-btn:active { transform: scale(0.97); }
+
+    .key-hints {
+      margin-top: 28px;
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .key-hints span { font-size: 10px; color: #445566; letter-spacing: 0.15em; }
+    .key-hints b { color: #667788; }
+
+    /* ── Game screen ──────────────────────────────────────── */
+    #game-screen {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+
+    /* ── Mobile HUD ───────────────────────────────────────── */
+    #mobile-hud {
+      display: none;
+      width: 100%;
+      max-width: 420px;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px;
+      height: 48px;
+      background: #111122;
+      border: 1px solid #223;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .mhud-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+    }
+    .mhud-stat span { font-size: 8px; color: #7788aa; letter-spacing: 0.15em; text-transform: uppercase; }
+    .mhud-stat b    { font-size: 16px; color: #fff; font-weight: bold; }
+
+    .mhud-next { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+    .mhud-next span { font-size: 8px; color: #7788aa; letter-spacing: 0.15em; text-transform: uppercase; }
+    #m-next-canvas  { background: #0d0d1a; border: 1px solid #223; }
+
+    #m-pause-btn {
+      width: 36px;
+      height: 36px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #7788aa;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      touch-action: manipulation;
+      flex-shrink: 0;
+    }
+    #m-pause-btn:active { background: rgba(255,255,255,0.18); color: #fff; }
+
+    /* ── Game wrap ────────────────────────────────────────── */
+    #game-wrap { display: flex; align-items: stretch; flex-shrink: 0; }
+
+    #game-canvas {
+      display: block;
+      border: 1px solid #223;
+      touch-action: none;
+      image-rendering: pixelated;
+    }
+
+    /* ── Desktop side panel ───────────────────────────────── */
+    #panel {
+      width: 148px;
+      padding: 14px 12px;
+      background: #111122;
+      border: 1px solid #223;
+      border-left: none;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .panel-heading {
+      font-size: 18px;
+      font-weight: bold;
+      letter-spacing: 0.4em;
+      color: #fff;
+      border-bottom: 1px solid #334;
+      padding-bottom: 8px;
+    }
+
+    .stat { line-height: 1.2; }
+    .stat-lbl { font-size: 9px; letter-spacing: 0.2em; color: #7788aa; text-transform: uppercase; }
+    .stat-val  { font-size: 22px; font-weight: bold; color: #fff; }
+
+    #next-canvas { display: block; background: #0d0d1a; border: 1px solid #223; width: 124px; height: 92px; }
+
+    #ctrl-list { margin-top: auto; font-size: 9px; color: #3a4a5a; letter-spacing: 0.08em; line-height: 2; }
+    #ctrl-list span { color: #556677; }
+
+    /* ── Mobile touch controls ────────────────────────────── */
+    #mobile-controls {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      max-width: 420px;
+      flex-shrink: 0;
+    }
+
+    .ctrl-row { display: flex; gap: 6px; width: 100%; }
+
+    .ctrl-btn {
+      flex: 1;
+      height: 52px;
+      font-size: 22px;
+      font-family: inherit;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #aabbcc;
+      border-radius: 6px;
+      cursor: pointer;
+      outline: none;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: background 0.08s, color 0.08s;
+    }
+    .ctrl-btn.pressed, .ctrl-btn:active {
+      background: rgba(255,255,255,0.2);
+      color: #ffffff;
+    }
+    .ctrl-drop {
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      height: 46px;
+    }
+
+    /* ── Back button ──────────────────────────────────────── */
+    #back-btn {
+      padding: 7px 20px;
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      background: transparent;
+      color: #445566;
+      border: 1px solid #334;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      outline: none;
+      touch-action: manipulation;
+      flex-shrink: 0;
+    }
+    #back-btn:hover, #back-btn:active { color: #aabbcc; border-color: #7788aa; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════ LANDING ══════════════════════════ -->
+<div id="landing">
+  <canvas id="bg-canvas"></canvas>
+  <div class="hero">
+    <h1>TETRIS</h1>
+    <p>The classic block-stacking puzzle</p>
+    <button id="start-btn">&#9654; START GAME</button>
+    <div class="key-hints">
+      <span><b>← →</b> MOVE</span>
+      <span><b>↑</b> ROTATE</span>
+      <span><b>↓</b> SOFT DROP</span>
+      <span><b>SPACE</b> HARD DROP</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ GAME ═════════════════════════════ -->
+<div id="game-screen">
+
+  <!-- Mobile top bar: score / level / lines / next / pause -->
+  <div id="mobile-hud">
+    <div class="mhud-stat"><span>SCR</span><b id="m-score">0</b></div>
+    <div class="mhud-stat"><span>LVL</span><b id="m-level">1</b></div>
+    <div class="mhud-stat"><span>LNS</span><b id="m-lines">0</b></div>
+    <div class="mhud-next">
+      <span>NEXT</span>
+      <canvas id="m-next-canvas" width="52" height="40"></canvas>
+    </div>
+    <button id="m-pause-btn">⏸</button>
+  </div>
+
+  <!-- Board + desktop panel -->
+  <div id="game-wrap">
+    <canvas id="game-canvas"></canvas>
+    <div id="panel">
+      <div class="panel-heading">TETRIS</div>
+      <div class="stat"><div class="stat-lbl">Score</div><div class="stat-val" id="score">0</div></div>
+      <div class="stat"><div class="stat-lbl">Level</div><div class="stat-val" id="level">1</div></div>
+      <div class="stat"><div class="stat-lbl">Lines</div><div class="stat-val" id="lines">0</div></div>
+      <div class="stat">
+        <div class="stat-lbl">Next</div>
+        <canvas id="next-canvas" width="124" height="92"></canvas>
+      </div>
+      <div id="ctrl-list">
+        <span>← →</span>&ensp;Move<br>
+        <span>&nbsp;↑&nbsp;</span>&ensp;Rotate<br>
+        <span>&nbsp;↓&nbsp;</span>&ensp;Soft drop<br>
+        <span>SPC</span>&ensp;Hard drop<br>
+        <span>&nbsp;P&nbsp;</span>&ensp;Pause<br>
+        <span>&nbsp;R&nbsp;</span>&ensp;Restart
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile on-screen controls -->
+  <div id="mobile-controls">
+    <div class="ctrl-row">
+      <button class="ctrl-btn" id="btn-left">&#9664;</button>
+      <button class="ctrl-btn" id="btn-rotate">&#8635;</button>
+      <button class="ctrl-btn" id="btn-right">&#9654;</button>
+    </div>
+    <div class="ctrl-row">
+      <button class="ctrl-btn ctrl-drop" id="btn-drop">&#9660;&ensp;DROP</button>
+    </div>
+  </div>
+
+  <button id="back-btn">&#8592; MENU</button>
+</div>
+
+<script>
+'use strict';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const COLS = 10, ROWS = 20;
+const BG_CLR = '#0d0d1a', GRID_CLR = '#1a1a2e';
+
+const PIECES = {
+  I: { color: '#00FFFF', shape: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]] },
+  O: { color: '#FFFF00', shape: [[1,1],[1,1]] },
+  T: { color: '#CC00FF', shape: [[0,1,0],[1,1,1],[0,0,0]] },
+  S: { color: '#00EE00', shape: [[0,1,1],[1,1,0],[0,0,0]] },
+  Z: { color: '#FF2222', shape: [[1,1,0],[0,1,1],[0,0,0]] },
+  J: { color: '#3355FF', shape: [[1,0,0],[1,1,1],[0,0,0]] },
+  L: { color: '#FF8800', shape: [[0,0,1],[1,1,1],[0,0,0]] },
+};
+
+const LINE_PTS = { 1: 100, 2: 300, 3: 500, 4: 800 };
+
+// Dynamic cell size — updated by updateLayout()
+let CELL = 30;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function rotateCW(mat) {
+  return mat[0].map((_, c) => mat.map(row => row[c]).reverse());
+}
+
+function matCells(mat, ox, oy) {
+  const out = [];
+  for (let r = 0; r < mat.length; r++)
+    for (let c = 0; c < mat[r].length; c++)
+      if (mat[r][c]) out.push([ox + c, oy + r]);
+  return out;
+}
+
+function randomBag() {
+  const keys = Object.keys(PIECES);
+  for (let i = keys.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+  }
+  return keys;
+}
+
+// ─── Responsive layout ────────────────────────────────────────────────────────
+
+function updateLayout() {
+  const mobile = window.innerWidth < 700;
+
+  document.getElementById('mobile-hud').style.display      = mobile ? 'flex' : 'none';
+  document.getElementById('mobile-controls').style.display = mobile ? 'flex' : 'none';
+  document.getElementById('panel').style.display           = mobile ? 'none' : 'flex';
+
+  if (mobile) {
+    // Fixed vertical space: top-pad(8) + hud(48) + gap(8) + gap(8) + controls(104) + gap(8) + back(32) + bot-pad(8) ≈ 224
+    const fixedH = 224;
+    const availH = window.innerHeight - fixedH;
+    const availW = window.innerWidth - 16;
+    CELL = Math.max(16, Math.min(32, Math.floor(Math.min(availW / COLS, availH / ROWS))));
+  } else {
+    CELL = 30;
+  }
+
+  const gc = document.getElementById('game-canvas');
+  gc.width  = COLS * CELL;
+  gc.height = ROWS * CELL;
+}
+
+// ─── Background animation ─────────────────────────────────────────────────────
+
+(function bgAnimation() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, blocks = [];
+
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const colors = Object.values(PIECES).map(p => p.color);
+  const BSIZE = 26;
+
+  function spawnBlock() {
+    return {
+      x: Math.random() * W, y: -BSIZE * 2,
+      speed: 0.5 + Math.random() * 1.2,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      alpha: 0.08 + Math.random() * 0.12,
+      rot: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.02,
+    };
+  }
+
+  for (let i = 0; i < 28; i++) { const b = spawnBlock(); b.y = Math.random() * H; blocks.push(b); }
+
+  function frame() {
+    if (!document.getElementById('landing').classList.contains('hidden')) {
+      ctx.clearRect(0, 0, W, H);
+      for (const b of blocks) {
+        b.y += b.speed; b.rot += b.rotSpeed;
+        if (b.y > H + BSIZE * 2) Object.assign(b, spawnBlock());
+        ctx.save();
+        ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+        ctx.globalAlpha = b.alpha; ctx.fillStyle = b.color;
+        ctx.fillRect(-BSIZE / 2, -BSIZE / 2, BSIZE, BSIZE);
+        ctx.restore();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+// ─── Tetris Game ──────────────────────────────────────────────────────────────
+
+class Tetris {
+  constructor() {
+    this.canvas   = document.getElementById('game-canvas');
+    this.ctx      = this.canvas.getContext('2d');
+    this.nextC    = document.getElementById('next-canvas');
+    this.nextCtx  = this.nextC.getContext('2d');
+    this.mNextC   = document.getElementById('m-next-canvas');
+    this.mNextCtx = this.mNextC.getContext('2d');
+    this._timerId = null;
+    this._onKey   = this._onKey.bind(this);
+  }
+
+  start() {
+    this._reset();
+    window.addEventListener('keydown', this._onKey);
+    this._schedule();
+    this._draw();
+  }
+
+  stop() {
+    if (this._timerId) { clearTimeout(this._timerId); this._timerId = null; }
+    window.removeEventListener('keydown', this._onKey);
+  }
+
+  _reset() {
+    this.board   = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    this.score   = 0;
+    this.level   = 1;
+    this.cleared = 0;
+    this.paused  = false;
+    this.over    = false;
+    this._bag    = [];
+    this.next    = this._fromBag();
+    this.current = this._spawn();
+    this._updateHUD();
+  }
+
+  _fromBag() {
+    if (!this._bag.length) this._bag = randomBag();
+    const name = this._bag.pop();
+    const { color, shape } = PIECES[name];
+    return { name, color, mat: shape.map(r => [...r]), x: 0, y: 0 };
+  }
+
+  _spawn() {
+    const p = this.next;
+    this.next = this._fromBag();
+    p.x = Math.floor((COLS - p.mat[0].length) / 2);
+    p.y = 0;
+    return p;
+  }
+
+  _cells(p) { return matCells(p.mat, p.x, p.y); }
+
+  _valid(p) {
+    for (const [x, y] of this._cells(p)) {
+      if (x < 0 || x >= COLS || y >= ROWS) return false;
+      if (y >= 0 && this.board[y][x]) return false;
+    }
+    return true;
+  }
+
+  _lock() {
+    for (const [x, y] of this._cells(this.current))
+      if (y >= 0) this.board[y][x] = this.current.color;
+    this._clearLines();
+    this.current = this._spawn();
+    if (!this._valid(this.current)) this.over = true;
+  }
+
+  _clearLines() {
+    const full = [];
+    for (let r = 0; r < ROWS; r++)
+      if (this.board[r].every(c => c !== null)) full.push(r);
+    if (!full.length) return;
+    for (const r of full) { this.board.splice(r, 1); this.board.unshift(Array(COLS).fill(null)); }
+    this.cleared += full.length;
+    this.score   += (LINE_PTS[full.length] || 0) * this.level;
+    this.level    = Math.floor(this.cleared / 10) + 1;
+    this._updateHUD();
+  }
+
+  _ghost() {
+    let g = { ...this.current };
+    while (this._valid({ ...g, y: g.y + 1 })) g = { ...g, y: g.y + 1 };
+    return g;
+  }
+
+  _speed() { return Math.max(80, 650 - (this.level - 1) * 55); }
+
+  _schedule() {
+    this._timerId = setTimeout(() => {
+      if (!this.over && !this.paused) this._tick();
+      if (!this.over) this._schedule();
+      this._draw();
+    }, this._speed());
+  }
+
+  _tick() {
+    const moved = { ...this.current, y: this.current.y + 1 };
+    if (this._valid(moved)) this.current = moved;
+    else this._lock();
+  }
+
+  // ── Keyboard handler ──────────────────────────────────────
+
+  _onKey(e) {
+    if (this.over) {
+      if (e.key === 'r' || e.key === 'R') { this._reset(); this._draw(); }
+      return;
+    }
+    const prevent = ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '];
+    if (prevent.includes(e.key)) e.preventDefault();
+    if (e.key === 'p' || e.key === 'P') { this.togglePause(); return; }
+    if (e.key === 'r' || e.key === 'R') { this._reset(); this._draw(); return; }
+    if (this.paused) return;
+    switch (e.key) {
+      case 'ArrowLeft':  this.moveLeft();  break;
+      case 'ArrowRight': this.moveRight(); break;
+      case 'ArrowDown':  this._softDrop(); break;
+      case 'ArrowUp':    this.rotate();    break;
+      case ' ':          this.hardDrop();  break;
+    }
+    this._draw();
+  }
+
+  // ── Public action methods (used by touch buttons too) ─────
+
+  togglePause() {
+    if (this.over) return;
+    this.paused = !this.paused;
+    document.getElementById('m-pause-btn').textContent = this.paused ? '▶' : '⏸';
+    this._draw();
+  }
+
+  moveLeft()  { if (this.over || this.paused) return; this._tryMove(-1, 0); this._draw(); }
+  moveRight() { if (this.over || this.paused) return; this._tryMove( 1, 0); this._draw(); }
+
+  rotate() {
+    if (this.over || this.paused) return;
+    this._rotate();
+    this._draw();
+  }
+
+  hardDrop() {
+    if (this.over || this.paused) return;
+    this._hardDrop();
+    this._draw();
+  }
+
+  _tryMove(dx, dy) {
+    const moved = { ...this.current, x: this.current.x + dx, y: this.current.y + dy };
+    if (this._valid(moved)) { this.current = moved; return true; }
+    return false;
+  }
+
+  _rotate() {
+    const rotated = { ...this.current, mat: rotateCW(this.current.mat) };
+    for (const kick of [0, -1, 1, -2, 2]) {
+      const kicked = { ...rotated, x: rotated.x + kick };
+      if (this._valid(kicked)) { this.current = kicked; return; }
+    }
+  }
+
+  _softDrop() {
+    if (!this._tryMove(0, 1)) this._lock();
+    else this.score += 1;
+    this._updateHUD();
+  }
+
+  _hardDrop() {
+    let dropped = 0;
+    while (this._tryMove(0, 1)) dropped++;
+    this.score += dropped * 2;
+    this._lock();
+    this._updateHUD();
+  }
+
+  _updateHUD() {
+    document.getElementById('score').textContent   = this.score;
+    document.getElementById('level').textContent   = this.level;
+    document.getElementById('lines').textContent   = this.cleared;
+    document.getElementById('m-score').textContent = this.score;
+    document.getElementById('m-level').textContent = this.level;
+    document.getElementById('m-lines').textContent = this.cleared;
+  }
+
+  // ── Drawing ───────────────────────────────────────────────
+
+  _draw() {
+    const ctx = this.ctx;
+    const W = COLS * CELL, H = ROWS * CELL;
+
+    ctx.fillStyle = BG_CLR;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = GRID_CLR;
+    ctx.lineWidth = 1;
+    for (let r = 0; r <= ROWS; r++) { ctx.beginPath(); ctx.moveTo(0, r*CELL); ctx.lineTo(W, r*CELL); ctx.stroke(); }
+    for (let c = 0; c <= COLS; c++) { ctx.beginPath(); ctx.moveTo(c*CELL, 0); ctx.lineTo(c*CELL, H); ctx.stroke(); }
+
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (this.board[r][c]) this._cell(ctx, c * CELL, r * CELL, this.board[r][c], CELL);
+
+    if (!this.over) {
+      const g = this._ghost();
+      ctx.save(); ctx.globalAlpha = 0.22;
+      for (const [x, y] of this._cells(g))
+        if (y >= 0) this._cell(ctx, x * CELL, y * CELL, this.current.color, CELL);
+      ctx.restore();
+      for (const [x, y] of this._cells(this.current))
+        if (y >= 0) this._cell(ctx, x * CELL, y * CELL, this.current.color, CELL);
+    }
+
+    if (this.over)   this._overlay(ctx, W, H, 'GAME OVER', 'R to restart');
+    if (this.paused) this._overlay(ctx, W, H, 'PAUSED',    'tap ⏸ to resume');
+
+    this._drawPreview(this.nextCtx,  this.nextC.width,  this.nextC.height,  22);
+    this._drawPreview(this.mNextCtx, this.mNextC.width, this.mNextC.height, 10);
+  }
+
+  _cell(ctx, px, py, color, size) {
+    const x = px + 1, y = py + 1, s = size - 2;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, s, s);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(x, y, s, 3);
+    ctx.fillRect(x, y, 3, s);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(x, y + s - 3, s, 3);
+    ctx.fillRect(x + s - 3, y, 3, s);
+  }
+
+  _drawPreview(ctx, W, H, cs) {
+    ctx.fillStyle = BG_CLR;
+    ctx.fillRect(0, 0, W, H);
+    const { mat, color } = this.next;
+    const pw = mat[0].length * cs, ph = mat.length * cs;
+    const ox = Math.floor((W - pw) / 2), oy = Math.floor((H - ph) / 2);
+    for (let r = 0; r < mat.length; r++)
+      for (let c = 0; c < mat[r].length; c++)
+        if (mat[r][c]) this._cell(ctx, ox + c * cs, oy + r * cs, color, cs);
+  }
+
+  _overlay(ctx, W, H, title, sub) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+    const bw = Math.min(220, W * 0.88), bh = 76;
+    const bx = (W - bw) / 2, by = (H - bh) / 2;
+    ctx.fillStyle = 'rgba(13,13,26,0.94)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.min(20, CELL * 0.68)}px Courier New`;
+    ctx.fillText(title, W / 2, H / 2 - 6);
+    ctx.fillStyle = '#8899aa';
+    ctx.font = `${Math.min(10, CELL * 0.36)}px Courier New`;
+    ctx.fillText(sub, W / 2, H / 2 + 18);
+    ctx.textAlign = 'left';
+  }
+}
+
+// ─── Mobile touch controls ────────────────────────────────────────────────────
+
+function wireTouchControls(game) {
+  // Left/Right: fire immediately, then repeat after a short delay
+  function addRepeat(id, action) {
+    const btn = document.getElementById(id);
+    let holdTimer = null, fireInterval = null;
+
+    function press(e) {
+      e.preventDefault();
+      btn.classList.add('pressed');
+      action();
+      holdTimer = setTimeout(() => { fireInterval = setInterval(action, 70); }, 200);
+    }
+    function release(e) {
+      e.preventDefault();
+      clearTimeout(holdTimer); clearInterval(fireInterval);
+      holdTimer = fireInterval = null;
+      btn.classList.remove('pressed');
+    }
+
+    btn.addEventListener('touchstart',  press,   { passive: false });
+    btn.addEventListener('touchend',    release, { passive: false });
+    btn.addEventListener('touchcancel', release, { passive: false });
+  }
+
+  // Rotate / Drop: single action per touch
+  function addTap(id, action) {
+    const btn = document.getElementById(id);
+    btn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      btn.classList.add('pressed');
+      action();
+      setTimeout(() => btn.classList.remove('pressed'), 150);
+    }, { passive: false });
+  }
+
+  addRepeat('btn-left',  () => game.moveLeft());
+  addRepeat('btn-right', () => game.moveRight());
+  addTap('btn-rotate',   () => game.rotate());
+  addTap('btn-drop',     () => game.hardDrop());
+
+  document.getElementById('m-pause-btn').addEventListener('touchstart', e => {
+    e.preventDefault();
+    game.togglePause();
+  }, { passive: false });
+}
+
+// ─── UI wiring ────────────────────────────────────────────────────────────────
+
+const game = new Tetris();
+wireTouchControls(game);
+
+document.getElementById('start-btn').addEventListener('click', () => {
+  const landing = document.getElementById('landing');
+  const screen  = document.getElementById('game-screen');
+
+  landing.classList.add('hidden');
+  setTimeout(() => {
+    landing.style.display = 'none';
+    screen.style.display  = 'flex';
+    updateLayout();
+    game.start();
+  }, 420);
+});
+
+document.getElementById('back-btn').addEventListener('click', () => {
+  game.stop();
+  const landing = document.getElementById('landing');
+  const screen  = document.getElementById('game-screen');
+
+  screen.style.display  = 'none';
+  landing.style.display = 'flex';
+  requestAnimationFrame(() => landing.classList.remove('hidden'));
+});
+
+window.addEventListener('resize', () => {
+  updateLayout();
+  if (document.getElementById('game-screen').style.display === 'flex') game._draw();
+});
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () =>
+    navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW:', e))
+  );
+}
+</script>
+</body>
+</html>
